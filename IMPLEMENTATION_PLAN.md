@@ -16,6 +16,31 @@ Milestones are sized for roughly one or two development sessions. Use test-first
 - Keep model prompts and schemas versioned in code. Persist their versions with metrics so later evaluation results remain explainable.
 - Begin with a small, attributed FastAPI corpus. Expand it only after the complete evaluation loop exists, so corpus growth creates measured retrieval pressure rather than bulk content.
 
+## Suggested Code Shape
+
+Use this as a starting map, not a requirement to create every module immediately:
+
+```text
+src/kt_agent/
+  cli.py                 # Typer commands, option parsing, terminal output
+  config.py              # paths, AWS region/model, version constants
+  models.py              # cross-layer Pydantic contracts
+  db.py                  # connection setup, migrations, transaction helper
+  repositories.py        # explicit document/run/session SQL operations
+  extraction/
+    discover.py          # recursive file discovery and parser dispatch
+    markdown.py          # one module per format as behavior warrants
+  ingestion.py           # reconciliation and ingestion orchestration
+  search.py              # FTS query construction and result mapping
+  bedrock.py             # narrow Converse adapter and retry policy
+  metadata.py            # enrichment request, validation, precedence merge
+  answering.py           # retrieval, prompt assembly, response validation
+  evaluation.py          # retrieval and answer evaluation runners
+  metrics.py             # timings, pricing, Git revision, summaries
+```
+
+Keep dependencies directed inward: `cli.py` calls application functions; application functions coordinate extractors, repositories, and the Bedrock adapter; low-level modules never import the CLI. Commands should parse input and render output, not contain business rules.
+
 ## Phase 1: Foundations
 
 These milestones establish isolated building blocks. They intentionally stop short of complete user workflows.
@@ -32,6 +57,8 @@ These milestones establish isolated building blocks. They intentionally stop sho
 - Add placeholder command groups matching the PRD without implementing their behavior.
 - Configure pytest and lightweight lint/type-check commands.
 - Add `.gitignore` rules for generated databases, caches, and local state.
+
+**Implementation method:** Point `[project.scripts]` at a Typer `app` in `cli.py`. Use Typer's `CliRunner` in tests so CLI behavior is tested in-process. Add only direct dependencies needed by the current milestone; defer extraction and AWS packages until their milestones.
 
 **Test first:** A CLI smoke test invokes `kt-agent --help` and confirms the expected command names.
 
@@ -50,6 +77,8 @@ These milestones establish isolated building blocks. They intentionally stop sho
 - Establish stable document IDs and prompt/enrichment version constants.
 - Keep run persistence models minimal until their tables are implemented.
 
+**Implementation method:** Start from payload examples, write their expected validation behavior, then introduce the smallest models that express it. Generate a stable document ID from a normalized corpus-relative path rather than file contents so updates retain identity. Represent sections as ordered records owned by an extracted document; represent metadata layers separately so precedence is an explicit merge, not mutation of generated data.
+
 **Test first:** Cover required fields, bounds, serialization round trips, exact metadata ID coverage, and invalid answer/citation shapes.
 
 **Exit criterion:** Representative extraction, metadata, retrieval, and answer payloads validate without touching SQLite or AWS.
@@ -66,6 +95,8 @@ These milestones establish isolated building blocks. They intentionally stop sho
 - Add the PRD's document, section, ingestion, session, answer-turn, and metrics entities at their minimum useful shape.
 - Add the document-level FTS5 table and explicit synchronization functions.
 - Implement small repository functions rather than a generic data-access abstraction.
+
+**Implementation method:** Have `connect(path)` enable foreign keys and return rows addressable by column name. Store a schema version in a small migration table and apply ordered migration functions inside transactions. Let the application layer own transaction boundaries by passing one connection into repository functions. Prefer an explicit `upsert_document`, `replace_sections`, `delete_document`, and `sync_fts` API over a generic repository class. Test whether the local Python build supports FTS5 before relying on it.
 
 **Test first:** Verify migration idempotence, foreign keys, transaction rollback, document replacement, deletion, and FTS synchronization using temporary databases.
 
@@ -84,6 +115,8 @@ These milestones establish isolated building blocks. They intentionally stop sho
 - Preserve headings, section order, and page numbers where available.
 - Extract deterministic titles and Markdown front matter without applying generated metadata yet.
 - Return per-file failures instead of aborting discovery.
+
+**Implementation method:** Discovery should yield sorted corpus-relative paths for reproducibility, then dispatch by lowercase suffix through a parser registry. Give every parser the same contract: raw path in, `ExtractedDocument` out. Normalize line endings once in shared code, but preserve meaningful interior whitespace in code blocks, tables, and prose; then hash the UTF-8 normalized content with SHA-256. Build sections during parsing rather than trying to reconstruct boundaries later. Catch exceptions around each file at the orchestration boundary, preserving the path and exception message in a failure result.
 
 **Test first:** Add small committed fixtures for all formats, malformed files, unsupported files, Unicode/text normalization, and front matter.
 
@@ -105,6 +138,8 @@ Each milestone now adds user-visible value while building on the foundations.
 - Create `source/`, `.ktagent/`, and the migrated database safely.
 - Implement an initial `status` view showing paths, schema version, and document count.
 
+**Implementation method:** Centralize path derivation in one function returning source, state, and database paths. Have the CLI resolve arguments, call an `initialize()` application function, and render its result. Use `mkdir(parents=True, exist_ok=True)` and run migrations on every initialization so repeat calls are safe. Query status through repository functions rather than checking files independently in the CLI.
+
 **Test first:** Cover first initialization, repeated initialization, custom paths, and existing unrelated files.
 
 **Exit criterion:** `init` followed by `status` produces a usable empty knowledge base without AWS access.
@@ -123,6 +158,8 @@ Each milestone now adds user-visible value while building on the foundations.
 - Implement `--rebuild` for derived state.
 - Mark metadata as pending rather than inventing fallback generated values.
 
+**Implementation method:** Split ingestion into three steps: discover/extract current files, load indexed `(source_path, source_hash)` values, and produce an `IngestionPlan`. Execute outcomes in deterministic path order. For a changed file, use one transaction to upsert its document, replace its sections, and synchronize FTS. Record failures separately and continue. Compute removals from the set of discovered supported paths, including paths whose extraction failed, so a corrupt current file is not mistaken for a deletion. Implement rebuild by recreating derived database state, never by modifying `source/`.
+
 **Test first:** Cover initial ingest, skip, update, removal, rebuild, partial parser failure, and rollback preserving prior valid state.
 
 **Exit criterion:** Repeated ingestion of a changing local corpus reports correct outcomes and leaves a reproducible index.
@@ -139,6 +176,8 @@ Each milestone now adds user-visible value while building on the foundations.
 - Search title, path, full text, and available metadata with documented BM25 weights.
 - Return ranked results, effective metadata, and matching excerpts.
 - Add configurable `--top-k` while retaining the default of five.
+
+**Implementation method:** Tokenize the user query conservatively and quote tokens before composing an FTS `MATCH` expression; never interpolate raw input into SQL. Use bound parameters for values. Select `bm25(...)`, `snippet(...)`, and document columns in one query, then order by score followed by source path for stable ties. Put this in a `search_documents(connection, query, top_k)` function shared by `search`, `ask`, and evaluation.
 
 **Test first:** Use a fixed corpus to assert ranking, tie behavior, snippets, empty results, punctuation, and malformed query handling.
 
@@ -162,6 +201,8 @@ Introduce Bedrock behind narrow interfaces only after the complete deterministic
 - Add a versioned pricing table and cost calculation.
 - Keep the live integration test explicitly opt-in.
 
+**Implementation method:** Accept a boto3 `bedrock-runtime` client in a small adapter rather than constructing it inside business logic. Make the adapter take already assembled messages and return a neutral result containing response text, token usage, latency, model ID, and region. Parse and validate outside or immediately above this transport boundary. Retry the complete call once only for named transient/API/parse/schema failures; return a typed terminal error after the second attempt. Mark live tests with a pytest marker excluded by default.
+
 **Test first:** Mock successful, transient, malformed, and terminal responses; test usage and cost calculations independently.
 
 **Exit criterion:** Offline tests cover the wrapper, and an opt-in test can make one authenticated call and report model, region, tokens, latency, and estimated cost.
@@ -182,6 +223,8 @@ Introduce Bedrock behind narrow interfaces only after the complete deterministic
 - Persist batch timing, usage, model, region, cost, and enrichment version.
 - Implement `--refresh-metadata`; preserve prior valid indexed state after terminal batch failure.
 
+**Implementation method:** Group planned added/changed documents with a simple slice iterator of size five. Serialize each request with document IDs as keys or explicit fields and require the validated response ID set to equal the request ID set. Compute effective metadata with one pure merge function where non-null front-matter fields replace generated fields. Do not open a database transaction while waiting on Bedrock: call and validate first, then open one transaction to write all documents in that batch and its metrics. On failure, write only run/file failure records in a separate transaction.
+
 **Test first:** Cover batch sizing, exact ID coverage, retry, no partial batch writes, precedence, refresh, and mixed successful/failed batches.
 
 **Exit criterion:** `ingest` enriches changed files with the required call count, exposes provenance, and remains correct under mocked failures.
@@ -200,6 +243,8 @@ Introduce Bedrock behind narrow interfaces only after the complete deterministic
 - Reject citations outside the retrieved set and resolve heading/page locators against stored sections when provided.
 - Persist retrieval/model timing, documents, response, usage, cost, and Git commit hash.
 
+**Implementation method:** Make `answer_question()` call the shared search function, load the full documents for those result IDs, and assemble clearly delimited source blocks with stable IDs and paths. Ask for JSON matching `AnswerResponse`; validate it before any human-readable rendering. Compare citation IDs to a set built from retrieved IDs, then validate optional heading/page locators against that document's sections. Persist the turn only after all validation succeeds; persist terminal call failures as failures, not answer turns containing placeholder text.
+
 **Test first:** Cover supported answers, unsupported questions, malformed responses, invented citations, retry, and terminal failure with no fabricated answer.
 
 **Exit criterion:** `kt-agent ask` performs one normal model call, displays a grounded answer or abstention, and records complete evidence.
@@ -216,6 +261,8 @@ Introduce Bedrock behind narrow interfaces only after the complete deterministic
 - Include only the immediately preceding Q&A pair in a normal follow-up.
 - Implement `ask --new` and print the active session ID.
 - Store full history while keeping prompt selection policy isolated and testable.
+
+**Implementation method:** Store one active-session marker in SQLite rather than process memory. At command start, `--new` creates and activates a session; otherwise load the active one or create it. A pure `build_conversation_context(previous_turn)` function should return either no prior messages or exactly the preceding user/assistant pair. Save every successful turn with its session ID and ordinal so complete history remains queryable without automatically entering the prompt.
 
 **Test first:** Cover first session creation, active reuse, `--new`, missing prior turns, and exact context included in the request.
 
@@ -239,6 +286,8 @@ Build evaluation after production paths exist so it measures the same code users
 - Persist per-case rank, duration, versions, and Git commit hash; summarize Recall@k.
 - Analyze misses before changing ranking weights or fixture wording.
 
+**Implementation method:** Validate each JSONL line into an evaluation-case model and give every case a stable ID. For each case, call the same `search_documents` function, find the lowest rank among expected paths, and derive a hit from `rank <= k`. Store raw per-case results first, then calculate aggregates from those records. Keep corpus source paths identical to expected fixture paths so evaluation does not need fuzzy matching.
+
 **Test first:** Test fixture validation, metric calculation, missing expected documents, and persisted run summaries with synthetic cases.
 
 **Exit criterion:** A committed baseline corpus and fixtures produce a repeatable retrieval report from a rebuilt index.
@@ -257,6 +306,8 @@ Build evaluation after production paths exist so it measures the same code users
 - Tune only inspectable FTS query construction or field weights, recording before/after results.
 - Document whether failures justify any deferred retrieval feature; do not add embeddings or chunking in v1.
 
+**Implementation method:** Add documents and cases in small batches, rebuild the index, and save a baseline result before changing ranking. Classify misses such as vocabulary mismatch, competing document, broad query, unsupported question, or bad fixture. Change one query rule or weight set at a time and compare the same fixture version. Keep improvements only when aggregate results rise without unexplained regressions in existing cases.
+
 **Test first:** Add each fixture with an explicit expected source and rationale before tuning retrieval for it.
 
 **Exit criterion:** Recall@5 reaches at least 80%, or the measured gap and causes are documented clearly enough to motivate a later architecture decision.
@@ -273,6 +324,8 @@ Build evaluation after production paths exist so it measures the same code users
 - Measure schema validity, citation validity, expected-source citation, unsupported-case abstention, latency, tokens, and cost.
 - Persist per-case outcomes and aggregate summaries.
 - Add a small documented manual-review protocol rather than an LLM judge.
+
+**Implementation method:** Run every case as a fresh session so prior questions cannot affect results. Score deterministic properties directly from the validated response and retrieved IDs; do not infer answer quality from prose. Persist model/config/prompt versions with each run. For manual review, sample a fixed case set and record a small rubric such as supported, complete, concise, and citation usefulness, along with reviewer notes.
 
 **Test first:** Use mocked answer responses to verify scoring and persistence before any paid run.
 
@@ -293,6 +346,8 @@ Build evaluation after production paths exist so it measures the same code users
 - Review error messages for missing credentials, model access, corrupt files, invalid responses, and database failures.
 - Document useful `sqlite3` inspection queries.
 
+**Implementation method:** Build `status` and `metrics` from read-only SQL queries returning typed summary records, then let the CLI format them. Keep the default output short and add limits or filters rather than dumping all rows. Map known domain failures to concise messages and non-zero exit codes at the CLI boundary; preserve technical details in persisted failure records for diagnosis.
+
 **Test first:** Assert concise command output for healthy, empty, partial-failure, and unavailable-configuration states.
 
 **Exit criterion:** A user can diagnose corpus state and inspect every required PRD metric without reading application code.
@@ -310,6 +365,8 @@ Build evaluation after production paths exist so it measures the same code users
 - Document model access, boto3 configuration, least-privilege IAM guidance, pricing assumptions, corpus license, and known limits.
 - Run offline tests from a clean environment, then the opt-in Bedrock smoke test and versioned evaluations.
 - Publish a concise architecture diagram and results table only after measured values exist.
+
+**Implementation method:** Create a traceability table mapping each acceptance criterion to a test name, command, evaluation run, or manual check. Rehearse the README literally in a clean clone or temporary directory. Capture evaluation outputs with corpus, index, prompt, model, pricing, and Git versions so reported portfolio numbers can be reproduced rather than presented as isolated claims.
 
 **Test first:** Maintain a release checklist that distinguishes automated, integration, evaluation, and manual verification.
 
