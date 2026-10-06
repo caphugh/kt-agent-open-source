@@ -13,6 +13,9 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["kt_agent"]
+
 [project.scripts]
 kt-agent = "kt_agent.cli:app"
 
