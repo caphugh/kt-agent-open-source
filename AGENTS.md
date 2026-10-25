@@ -23,13 +23,16 @@ kt-agent-open-source/
 │   ├── .python-version    Pins Python 3.14.
 │   ├── kt_agent/          The importable package (flat layout — no src/ wrapper).
 │   │   ├── api/           FastAPI adapter layer. Thin; calls into core/.
-│   │   │   └── app.py       FastAPI app instance + routes (e.g. /api/health).
+│   │   │   ├── app.py       FastAPI app instance + routes (/api/health, /api/llm/complete).
+│   │   │   └── deps.py      Cached dependencies (get_settings, get_llm); override in tests.
 │   │   ├── core/          Shared business logic. NO fastapi/typer imports here.
 │   │   │   └── search.py    Deterministic search (TODO: implementation).
 │   │   ├── cli.py         Typer CLI. Thin; wraps core/ (currently placeholders).
-│   │   ├── config.py      Configuration.
+│   │   ├── config.py      Settings (pydantic-settings, KT_LLM_* env vars / backend/.env).
+│   │   ├── llm.py         Stateless Bedrock LLM layer (the ONLY boto3 importer).
 │   │   ├── db.py          SQLite access.
 │   │   └── models.py      Pydantic models (shared data shapes).
+│   ├── .env.example       Template for backend/.env (gitignored). Sets KT_LLM_PROFILE.
 │   └── tests/            pytest suite (testpaths = ["tests"]).
 │
 └── frontend/             Vite + React + TypeScript app (pnpm).
@@ -39,7 +42,8 @@ kt-agent-open-source/
     ├── index.html         App HTML entry.
     ├── src/
     │   ├── main.tsx         React entry point.
-    │   ├── App.tsx          Root component (currently probes /api/health).
+    │   ├── App.tsx          Root component (probes /api/health, hosts LlmForm).
+    │   ├── LlmForm.tsx      Prompt form calling POST /api/llm/complete.
     │   └── assets/          Static assets imported by components.
     └── public/            Static files served as-is.
 ```
@@ -50,6 +54,13 @@ kt-agent-open-source/
   nothing about HTTP or the terminal. Both `api/` (FastAPI) and `cli.py` (Typer)
   are thin adapters that call `core/` and format its output. Put real logic in
   `core/`, not in route handlers or CLI commands.
+
+- **LLM layer.** `kt_agent/llm.py` is a stateless phone line to Bedrock:
+  `LLM.send(messages) -> Reply`. Callers supply the full message list; memory,
+  prompt building and output validation belong to callers (future `core/`).
+  boto3 is imported only there, and `core/` must receive an `LLM` instance rather
+  than build one. Config lives in `config.py`; `api/deps.py` provides the cached
+  instance (override `get_llm` in tests). Design: `docs/requirements/llm-connection.md`.
 
 - **Dev traffic flow.** Browser → Vite (`:5173`) → proxy on `/api/*` →
   FastAPI (`:8000`). This avoids CORS in development. Frontend code should use
@@ -75,6 +86,8 @@ kt-agent-open-source/
 | Add an API endpoint | `backend/kt_agent/api/app.py` (delegate to `core/`) |
 | Add business logic | `backend/kt_agent/core/` |
 | Add a CLI command | `backend/kt_agent/cli.py` (delegate to `core/`) |
+| Change LLM profile/model/limits | `backend/.env` (see `.env.example`) or `config.py` defaults |
+| Change how Bedrock is called | `backend/kt_agent/llm.py` (`_to_converse` / `_from_converse`) |
 | Add a shared data model | `backend/kt_agent/models.py` |
 | Add a Python dependency | `cd backend && uv add <pkg>` |
 | Add a frontend dependency | `pnpm install --dir frontend <pkg>` |
@@ -87,4 +100,8 @@ kt-agent-open-source/
   pre-monorepo layout; the canonical docs are the root `README.md` and `PRD.md`.
 - `IMPLEMENTATION_PLAN.md` / `PRD.md` may still reference the old `src/kt_agent/`
   path and are pending a docs cleanup.
-- `core/search.py` and the CLI commands are placeholders pending feature work.
+- `core/search.py` and most CLI commands are placeholders pending feature work
+  (only `kt-agent llm` is implemented).
+- `db.py` is listed above but does not exist yet.
+- `backend/PRD.md` says no `.env` is required. That still holds for credentials
+  (boto3 chain only); `backend/.env` is an optional place for `KT_LLM_*` settings.
