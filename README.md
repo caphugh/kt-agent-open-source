@@ -33,36 +33,25 @@ cd backend && uv sync && cd ..
 ## LLM configuration (AWS Bedrock)
 
 The backend talks to Claude on Amazon Bedrock through an AWS profile. Credentials
-come from the normal boto3 chain only; nothing secret is stored in the repo.
+come from the normal boto3 chain only; you must create your own `.env` file with
+your own Amazon Bedrock credentials. Follow the instructions below:
 
 ```bash
 cp backend/.env.example backend/.env    # sets KT_LLM_PROFILE=ailab
 aws sso login --profile ailab           # if your SSO session has expired
 ```
 
-`backend/.env` is gitignored. Setting `KT_LLM_PROFILE` as a normal environment
-variable works too. Settings (all prefixed `KT_LLM_`):
+Setting `KT_LLM_PROFILE` as a normal environment
+variable works too. Settings:
 
-| Variable | Default |
-|---|---|
-| `KT_LLM_PROFILE` | none (required to call the model) |
-| `KT_LLM_REGION` | `us-east-1` |
-| `KT_LLM_MODEL_ID` | `us.anthropic.claude-sonnet-5-5` |
-| `KT_LLM_MAX_TOKENS` | `1024` |
-| `KT_LLM_MAX_RETRIES` | `3` |
-| `KT_LLM_READ_TIMEOUT` | `60` (seconds) |
-
-Without a profile the app still starts; the LLM call fails with a clear error.
-
-Try it:
-
-```bash
-cd backend && uv run kt-agent llm "hello"    # CLI one-off request
-pnpm dev                                      # then use the "Ask the LLM" form at :5173
-```
-
-The HTTP endpoint behind the form is `POST /api/llm/complete` with body
-`{"prompt": "..."}`.
+| Variable              | Default                           |
+| --------------------- | --------------------------------- |
+| `KT_LLM_PROFILE`      | none (required to call the model) |
+| `KT_LLM_REGION`       | `us-east-1`                       |
+| `KT_LLM_MODEL_ID`     | `us.anthropic.claude-sonnet-5-5`  |
+| `KT_LLM_MAX_TOKENS`   | `1024`                            |
+| `KT_LLM_MAX_RETRIES`  | `3`                               |
+| `KT_LLM_READ_TIMEOUT` | `60` (seconds)                    |
 
 ## Running in development
 
