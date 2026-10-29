@@ -30,6 +30,29 @@ cd frontend && pnpm install
 cd backend && uv sync && cd ..
 ```
 
+## LLM configuration (AWS Bedrock)
+
+The backend talks to Claude on Amazon Bedrock through an AWS profile. Credentials
+come from the normal boto3 chain only; you must create your own `.env` file with
+your own Amazon Bedrock credentials. Follow the instructions below:
+
+```bash
+cp backend/.env.example backend/.env    # sets KT_LLM_PROFILE=ailab
+aws sso login --profile ailab           # if your SSO session has expired
+```
+
+Setting `KT_LLM_PROFILE` as a normal environment
+variable works too. Settings:
+
+| Variable              | Default                           |
+| --------------------- | --------------------------------- |
+| `KT_LLM_PROFILE`      | none (required to call the model) |
+| `KT_LLM_REGION`       | `us-east-1`                       |
+| `KT_LLM_MODEL_ID`     | `us.anthropic.claude-sonnet-5-5`  |
+| `KT_LLM_MAX_TOKENS`   | `1024`                            |
+| `KT_LLM_MAX_RETRIES`  | `3`                               |
+| `KT_LLM_READ_TIMEOUT` | `60` (seconds)                    |
+
 ## Running in development
 
 From the repository root:

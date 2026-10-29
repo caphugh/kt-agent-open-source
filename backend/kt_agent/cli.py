@@ -1,5 +1,8 @@
 import typer
 
+from kt_agent.config import Settings
+from kt_agent.llm import LLM, LLMError, Message
+
 app = typer.Typer(help="CLI for the KT Agent application.")
 
 init_app = typer.Typer(
@@ -51,6 +54,21 @@ def eval_retrieval() -> None:
 @eval_app.command("answers")
 def eval_answers() -> None:
     """Placeholder for answer evaluation."""
+
+
+def _build_llm() -> LLM:
+    return LLM(Settings())
+
+
+@app.command("llm")
+def llm_command(prompt: str = typer.Argument(..., help="Prompt to send.")) -> None:
+    """Send a one-off prompt to the LLM and print the reply."""
+    try:
+        reply = _build_llm().send([Message(role="user", text=prompt)])
+    except LLMError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(reply.text)
 
 
 @app.command()
