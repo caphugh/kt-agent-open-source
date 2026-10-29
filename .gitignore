@@ -18,3 +18,5 @@ build/
 
 # KT-Agent derived local state
 knowledge/.ktagent/
+
+node_modules/

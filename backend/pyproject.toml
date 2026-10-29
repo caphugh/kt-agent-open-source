@@ -5,8 +5,10 @@ description = "A local command-line knowledge-base agent."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.149.0",
     "pydantic>=2",
     "typer>=0.12",
+    "uvicorn>=0.54.0",
 ]
 
 [build-system]
